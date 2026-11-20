@@ -107,14 +107,19 @@ def register_hud_handler(hud_obj):
         f = scene.frame_current
         if f <= 340:
             hud_obj.data.body = "1. Toàn cảnh 360° & Số liệu kích thước (Tất cả cửa đóng hoàn toàn)"
-        elif f <= 480:
+        elif f <= 450:
             hud_obj.data.body = (
-                "2. Ẩn mái tôn & mờ dần nắp khối trước — Mở lần lượt cửa thông giữa 2 khối\n"
-                "Lưu ý: Chiều cao mái tôn (20–40 cm) sẽ ảnh hưởng đến độ mở cửa nắp trên"
+                "2. Ẩn mái tôn — Mở & đóng cửa nắp chuồng đực\n"
+                "Lưu ý: Chiều cao mái tôn (20–40 cm) sẽ ảnh hưởng đến độ mở cửa nắp"
+            )
+        elif f <= 615:
+            hud_obj.data.body = (
+                "3. Góc cận — Mở lần lượt 4 cửa thông sang chuồng đực rồi đóng lại\n"
+                "Ẩn nắp chuồng đực sau khi đóng để thấy rõ 4 khoang thông nhau"
             )
         else:
             hud_obj.data.body = (
-                "3. Mở lần lượt cửa nắp trên của 4 chuồng chính\n"
+                "4. Mở lần lượt 4 cửa nắp trên chuồng chính rồi đóng lại\n"
                 "Lưu ý: Chiều cao mái tôn (20–40 cm) sẽ ảnh hưởng đến độ mở cửa nắp trên"
             )
 
@@ -128,7 +133,7 @@ def setup_showcase_animation():
     scene = bpy.context.scene
     scene.render.fps = 24
     scene.frame_start = 1
-    scene.frame_end = 600  # 25 seconds at 24 fps
+    scene.frame_end = 792  # 33 seconds at 24 fps
 
     cam = scene.camera
     cam_target = bpy.data.objects.new("Cam_Target", None)
@@ -160,17 +165,18 @@ def setup_showcase_animation():
     for g in slide_gates:
         g.location.z = 0.0
         g.keyframe_insert(data_path="location", index=2, frame=1)
-        g.keyframe_insert(data_path="location", index=2, frame=372)
+        g.keyframe_insert(data_path="location", index=2, frame=453)
 
     for d in top_doors:
         d.rotation_euler.y = 0.0
         d.keyframe_insert(data_path="rotation_euler", index=1, frame=1)
-        d.keyframe_insert(data_path="rotation_euler", index=1, frame=482)
+        d.keyframe_insert(data_path="rotation_euler", index=1, frame=631)
 
     con_duc_door.rotation_euler.y = 0.0
     con_duc_door.keyframe_insert(data_path="rotation_euler", index=1, frame=1)
+    con_duc_door.keyframe_insert(data_path="rotation_euler", index=1, frame=350)
 
-    # --- 2. Phase 1 (Frames 1..340): Hold overview, then 360° orbit slowed down by half (~12.6s) ---
+    # --- 2. Phase 1 (Frames 1..340): Hold overview, then slow 360° orbit ---
     center_x, center_y = -35.0, 0.0
     orbit_radius = 740.0
     orbit_z = 405.0
@@ -184,7 +190,6 @@ def setup_showcase_animation():
     keyframe_cam_track(cam, cam_target, 1, init_pos, (center_x, center_y, 68.0))
     keyframe_cam_track(cam, cam_target, 36, init_pos, (center_x, center_y, 68.0))
 
-    # 360-degree circular orbit across frames 37..340 (304 frames = 12.67s, half the previous speed)
     orbit_steps = 24
     for i in range(1, orbit_steps + 1):
         u = i / orbit_steps
@@ -198,7 +203,7 @@ def setup_showcase_animation():
         )
         keyframe_cam_track(cam, cam_target, frame, pos, (center_x, center_y, 68.0))
 
-    # --- 3. Phase 2 (Frames 341..480): Hide roof, gradually fade out Cua_Nap_Con_Duc, zoom in close & open connecting gates ---
+    # --- 3. Phase 2 (Frames 341..450): Hide roof, OPEN & CLOSE Cua_Nap_Con_Duc, then fade it out ---
     roof_obj.hide_render = False
     roof_obj.hide_viewport = False
     roof_obj.keyframe_insert("hide_render", frame=1)
@@ -211,7 +216,6 @@ def setup_showcase_animation():
     roof_obj.keyframe_insert("hide_render", frame=341)
     roof_obj.keyframe_insert("hide_viewport", frame=341)
 
-    # Hide roof dimension labels while Mai_Ton is hidden so they don't block the close-up
     for lbl_name in ("Label_Mái rộng 280 cm", "Label_Mái dài 230 cm"):
         lbl = bpy.data.objects.get(lbl_name)
         if lbl is not None:
@@ -221,52 +225,86 @@ def setup_showcase_animation():
             lbl.hide_render = True
             lbl.keyframe_insert("hide_render", frame=341)
 
-    # Fade Cua_Nap_Con_Duc out smoothly from frame 342 -> 372, then hide completely
+    # Frame male cage cleanly while opening and closing Cua_Nap_Con_Duc
+    keyframe_cam_track(cam, cam_target, 360, (-415.0, -320.0, 355.0), (-55.0, 0.0, 96.0))
+    keyframe_cam_track(cam, cam_target, 426, (-415.0, -320.0, 355.0), (-55.0, 0.0, 96.0))
+
+    # Open Cua_Nap_Con_Duc (350..378), hold open (378..402), close back down (402..426)
+    con_duc_door.rotation_euler.y = math.radians(52.0)
+    con_duc_door.keyframe_insert(data_path="rotation_euler", index=1, frame=378)
+    con_duc_door.keyframe_insert(data_path="rotation_euler", index=1, frame=402)
+    con_duc_door.rotation_euler.y = 0.0
+    con_duc_door.keyframe_insert(data_path="rotation_euler", index=1, frame=426)
+    con_duc_door.keyframe_insert(data_path="rotation_euler", index=1, frame=792)
+
+    # Only AFTER closing Cua_Nap_Con_Duc, fade it out smoothly (426..450) and hide at 451
     con_duc_fade_mats = make_unique_materials_for_fade(con_duc_door)
     keyframe_materials_alpha(con_duc_fade_mats, 1.0, 1)
-    keyframe_materials_alpha(con_duc_fade_mats, 1.0, 342)
-    keyframe_materials_alpha(con_duc_fade_mats, 0.0, 372)
+    keyframe_materials_alpha(con_duc_fade_mats, 1.0, 426)
+    keyframe_materials_alpha(con_duc_fade_mats, 0.0, 450)
+    keyframe_materials_alpha(con_duc_fade_mats, 0.0, 610)
+    keyframe_materials_alpha(con_duc_fade_mats, 1.0, 628)
+    keyframe_materials_alpha(con_duc_fade_mats, 1.0, 792)
 
     con_duc_door.hide_render = False
     con_duc_door.hide_viewport = False
     con_duc_door.keyframe_insert("hide_render", frame=1)
     con_duc_door.keyframe_insert("hide_viewport", frame=1)
-    con_duc_door.keyframe_insert("hide_render", frame=372)
-    con_duc_door.keyframe_insert("hide_viewport", frame=372)
+    con_duc_door.keyframe_insert("hide_render", frame=450)
+    con_duc_door.keyframe_insert("hide_viewport", frame=450)
     con_duc_door.hide_render = True
     con_duc_door.hide_viewport = True
-    con_duc_door.keyframe_insert("hide_render", frame=373)
-    con_duc_door.keyframe_insert("hide_viewport", frame=373)
+    con_duc_door.keyframe_insert("hide_render", frame=451)
+    con_duc_door.keyframe_insert("hide_viewport", frame=451)
+    con_duc_door.keyframe_insert("hide_render", frame=609)
+    con_duc_door.keyframe_insert("hide_viewport", frame=609)
+    con_duc_door.hide_render = False
+    con_duc_door.hide_viewport = False
+    con_duc_door.keyframe_insert("hide_render", frame=610)
+    con_duc_door.keyframe_insert("hide_viewport", frame=610)
 
-    # Zoom camera IN CLOSE to look straight down into khoi_khung_luoi_con_duc and the 4 connecting gates
-    # Sweeps smoothly from the -Y end (Cage 1) across to Cage 4 so every open passage is clearly visible
-    keyframe_cam_track(cam, cam_target, 370, (-290.0, -255.0, 265.0), (-45.0, -45.0, 80.0))
-    keyframe_cam_track(cam, cam_target, 476, (-295.0, -140.0, 275.0), (-45.0, 20.0, 80.0))
+    # --- 4. Phase 3 (Frames 451..615): Close-up — Open all 4 connecting sliding gates, hold, then close ---
+    keyframe_cam_track(cam, cam_target, 454, (-310.0, -270.0, 285.0), (-45.0, -40.0, 88.0))
+    keyframe_cam_track(cam, cam_target, 540, (-320.0, -170.0, 295.0), (-45.0, 15.0, 90.0))
+    keyframe_cam_track(cam, cam_target, 564, (-375.0, -255.0, 320.0), (-45.0, 0.0, 88.0))
+    keyframe_cam_track(cam, cam_target, 608, (-375.0, -255.0, 320.0), (-45.0, 0.0, 88.0))
 
-    # Sequential full opening of the 4 connecting sliding gates (0 -> 58 cm)
+    # Sequential opening (454..534), hold open (..562), then sequential closing (562..604)
     for idx, g in enumerate(slide_gates):
-        f_s = 376 + idx * 24
-        f_e = f_s + 22
-        g.location.z = 0.0
-        g.keyframe_insert(data_path="location", index=2, frame=f_s)
-        g.location.z = 58.0
-        g.keyframe_insert(data_path="location", index=2, frame=f_e)
-        g.keyframe_insert(data_path="location", index=2, frame=600)
+        f_open_s = 454 + idx * 20
+        f_open_e = f_open_s + 20
+        f_close_s = 562 + idx * 8
+        f_close_e = f_close_s + 18
 
-    # --- 4. Phase 3 (Frames 481..600): Pull back slightly & open the 4 cage top hatch doors sequentially ---
-    keyframe_cam_track(cam, cam_target, 502, (-425.0, -325.0, 365.0), (-25.0, 0.0, 88.0))
-    keyframe_cam_track(cam, cam_target, 600, (-425.0, -325.0, 365.0), (-25.0, 0.0, 88.0))
+        g.location.z = 0.0
+        g.keyframe_insert(data_path="location", index=2, frame=f_open_s)
+        g.location.z = 58.0
+        g.keyframe_insert(data_path="location", index=2, frame=f_open_e)
+        g.keyframe_insert(data_path="location", index=2, frame=f_close_s)
+        g.location.z = 0.0
+        g.keyframe_insert(data_path="location", index=2, frame=f_close_e)
+        g.keyframe_insert(data_path="location", index=2, frame=792)
+
+    # --- 5. Phase 4 (Frames 616..792): Pull back, restore closed Cua_Nap_Con_Duc, open & close 4 top hatch doors ---
+    keyframe_cam_track(cam, cam_target, 632, (-505.0, -385.0, 410.0), (-20.0, 0.0, 118.0))
+    keyframe_cam_track(cam, cam_target, 792, (-505.0, -385.0, 410.0), (-20.0, 0.0, 118.0))
 
     for idx, d in enumerate(top_doors):
-        f_s = 486 + idx * 22
-        f_e = f_s + 22
-        d.rotation_euler.y = 0.0
-        d.keyframe_insert(data_path="rotation_euler", index=1, frame=f_s)
-        d.rotation_euler.y = math.radians(42.0)
-        d.keyframe_insert(data_path="rotation_euler", index=1, frame=f_e)
-        d.keyframe_insert(data_path="rotation_euler", index=1, frame=600)
+        f_open_s = 632 + idx * 18
+        f_open_e = f_open_s + 20
+        f_close_s = 732 + idx * 8
+        f_close_e = f_close_s + 20
 
-    for obj in [cam, cam_target] + slide_gates + top_doors:
+        d.rotation_euler.y = 0.0
+        d.keyframe_insert(data_path="rotation_euler", index=1, frame=f_open_s)
+        d.rotation_euler.y = math.radians(42.0)
+        d.keyframe_insert(data_path="rotation_euler", index=1, frame=f_open_e)
+        d.keyframe_insert(data_path="rotation_euler", index=1, frame=f_close_s)
+        d.rotation_euler.y = 0.0
+        d.keyframe_insert(data_path="rotation_euler", index=1, frame=f_close_e)
+        d.keyframe_insert(data_path="rotation_euler", index=1, frame=792)
+
+    for obj in [cam, cam_target, con_duc_door] + slide_gates + top_doors:
         set_smooth_beziers(obj)
 
     # Configure MP4 H.264 output
@@ -281,6 +319,6 @@ def setup_showcase_animation():
 
 if __name__ == "__main__":
     setup_showcase_animation()
-    print(f"[Showcase] Rendering 600-frame (25s) MP4 video to: {OUTPUT_VIDEO}")
+    print(f"[Showcase] Rendering 792-frame (33s) MP4 video to: {OUTPUT_VIDEO}")
     bpy.ops.render.render(animation=True)
     print(f"[Showcase] Finished rendering video: {OUTPUT_VIDEO}")
