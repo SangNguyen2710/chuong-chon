@@ -6,7 +6,7 @@ import mathutils
 def clear_scene():
     for obj in list(bpy.data.objects):
         bpy.data.objects.remove(obj, do_unlink=True)
-    for col_name in ("Cua_Nap_Mo_NegY_Sang_Y", "Cua_Nap_Mo_Y_Sang_NegY"):
+    for col_name in ("Cua_Nap_Mo_NegY_Sang_Y", "Cua_Nap_Mo_Y_Sang_NegY", "Annotations_Kich_Thuoc"):
         col = bpy.data.collections.get(col_name)
         if col is not None:
             bpy.data.collections.remove(col)
@@ -16,6 +16,9 @@ def clear_scene():
     for block in bpy.data.materials:
         if block.users == 0:
             bpy.data.materials.remove(block)
+    for block in bpy.data.fonts:
+        if block.users == 0:
+            bpy.data.fonts.remove(block)
 
 def default_collection():
     return bpy.data.collections.get("Collection") or bpy.context.scene.collection
@@ -480,7 +483,7 @@ def build_con_duc_block(name, size_x, size_y, size_z, bar_thick, cell_size, wire
         rib_xs=[],
         rib_ys=(-60.0, 0.0, 60.0),
         latch_offsets=(-60.0, 60.0),
-        open_deg=48.0,
+        open_deg=0.0,
         mat_gate_frame=mat_gate_frame,
         mat_fence=mat_fence,
         mat_handle=mat_handle,
@@ -488,6 +491,245 @@ def build_con_duc_block(name, size_x, size_y, size_z, bar_thick, cell_size, wire
     )
 
     return body_obj, door_obj
+
+def build_corner_support_legs(name, x_min, x_max, y_min, y_max, height, leg_size, mat_leg, mat_foot):
+    """
+    Build 4 vertical steel support legs at the 4 outermost corners of the full assembly
+    supporting it at 'height' (50 cm) above the ground Z=0.
+    """
+    mesh = bpy.data.meshes.new(name + "_Mesh")
+    obj = bpy.data.objects.new(name, mesh)
+    default_collection().objects.link(obj)
+    obj.data.materials.append(mat_leg)   # 0
+    obj.data.materials.append(mat_foot)  # 1
+
+    bm = bmesh.new()
+    s = leg_size
+    foot_pad = 1.2
+    foot_h = 0.8
+
+    corners = [
+        (x_min, x_min + s, y_min, y_min + s),
+        (x_min, x_min + s, y_max - s, y_max),
+        (x_max - s, x_max, y_min, y_min + s),
+        (x_max - s, x_max, y_max - s, y_max),
+    ]
+
+    for x0, x1, y0, y1 in corners:
+        add_box(bm, x0, x1, y0, y1, foot_h, height)
+
+    foot_start = len(bm.faces)
+    for x0, x1, y0, y1 in corners:
+        add_box(bm, x0 - foot_pad, x1 + foot_pad, y0 - foot_pad, y1 + foot_pad, 0.0, foot_h)
+
+    bm.faces.ensure_lookup_table()
+    for i in range(foot_start, len(bm.faces)):
+        bm.faces[i].material_index = 1
+
+    bm.to_mesh(mesh)
+    bm.free()
+    return obj
+
+def build_upper_pillars_and_roof(
+    x_min, x_max, y_min, y_max, z_base,
+    h_pos_x, h_neg_x, pillar_size, overhang,
+    mat_pillar, mat_roof
+):
+    """
+    Build 4 upper steel pillars at the same 4 corner footprints (Z = z_base upwards):
+      - +X side: height = h_pos_x (40 cm)
+      - -X side: height = h_neg_x (20 cm)
+    Then drape a 3D corrugated metal roof sheet ('Mai_Ton') from the high +X pillars
+    down to the low -X pillars with 'overhang' (20 cm) beyond every boundary.
+    """
+    # 1. 4 Upper Corner Pillars (Cot_Mai_Ton_4_Goc)
+    p_mesh = bpy.data.meshes.new("Cot_Mai_Ton_4_Goc_Mesh")
+    pillars_obj = bpy.data.objects.new("Cot_Mai_Ton_4_Goc", p_mesh)
+    default_collection().objects.link(pillars_obj)
+    pillars_obj.data.materials.append(mat_pillar)
+
+    s = pillar_size
+    pbm = bmesh.new()
+    # 2 pillars on +X (40 cm tall)
+    for y0, y1 in [(y_min, y_min + s), (y_max - s, y_max)]:
+        add_box(pbm, x_max - s, x_max, y0, y1, z_base, z_base + h_pos_x)
+    # 2 pillars on -X (20 cm tall)
+    for y0, y1 in [(y_min, y_min + s), (y_max - s, y_max)]:
+        add_box(pbm, x_min, x_min + s, y0, y1, z_base, z_base + h_neg_x)
+
+    pbm.to_mesh(p_mesh)
+    pbm.free()
+
+    # 2. Sloped Corrugated Roof Sheet (Mai_Ton)
+    # Plane passes through top centers of +X pillars (x_high, z_high) and -X pillars (x_low, z_low)
+    x_high = x_max - s / 2.0
+    z_high = z_base + h_pos_x
+    x_low = x_min + s / 2.0
+    z_low = z_base + h_neg_x
+    slope = (z_high - z_low) / (x_high - x_low)
+
+    def roof_z(x):
+        return z_low + (x - x_low) * slope
+
+    rx0, rx1 = x_min - overhang, x_max + overhang
+    ry0, ry1 = y_min - overhang, y_max + overhang
+
+    r_mesh = bpy.data.meshes.new("Mai_Ton_Mesh")
+    roof_obj = bpy.data.objects.new("Mai_Ton", r_mesh)
+    default_collection().objects.link(roof_obj)
+    roof_obj.data.materials.append(mat_roof)
+
+    rbm = bmesh.new()
+    pitch = 10.0        # 10 cm corrugation pitch
+    amp = 1.4           # 1.4 cm wave height
+    n_waves = int(round((ry1 - ry0) / pitch))
+    segs_y = n_waves * 4
+    segs_x = 12
+
+    verts_grid = []
+    for ix in range(segs_x + 1):
+        u = ix / segs_x
+        x = rx0 + u * (rx1 - rx0)
+        base_z = roof_z(x)
+        row = []
+        for iy in range(segs_y + 1):
+            v = iy / segs_y
+            y = ry0 + v * (ry1 - ry0)
+            wave = 0.5 * (1.0 - math.cos(2.0 * math.pi * (y - ry0) / pitch)) * amp
+            row.append(rbm.verts.new((x, y, base_z + wave)))
+        verts_grid.append(row)
+
+    for ix in range(segs_x):
+        for iy in range(segs_y):
+            v00 = verts_grid[ix][iy]
+            v10 = verts_grid[ix + 1][iy]
+            v11 = verts_grid[ix + 1][iy + 1]
+            v01 = verts_grid[ix][iy + 1]
+            rbm.faces.new((v00, v10, v11, v01))
+
+    rbm.to_mesh(r_mesh)
+    rbm.free()
+
+    # Give the corrugated sheet real metallic thickness and smooth shading
+    sol = roof_obj.modifiers.new(name="SheetThickness", type='SOLIDIFY')
+    sol.thickness = 0.45
+    sol.offset = 1.0
+
+    bpy.ops.object.select_all(action='DESELECT')
+    roof_obj.select_set(True)
+    bpy.context.view_layer.objects.active = roof_obj
+    bpy.ops.object.shade_smooth()
+
+    return pillars_obj, roof_obj
+
+def create_emissive_material(name, color, strength=1.5):
+    mat = bpy.data.materials.new(name=name)
+    mat.use_nodes = True
+    bsdf = mat.node_tree.nodes.get("Principled BSDF")
+    if bsdf:
+        bsdf.inputs["Base Color"].default_value = color
+        bsdf.inputs["Roughness"].default_value = 0.3
+        if "Emission Color" in bsdf.inputs:
+            bsdf.inputs["Emission Color"].default_value = color
+            bsdf.inputs["Emission Strength"].default_value = strength
+    return mat
+
+def add_line_segment(bm, p1, p2, radius=0.32):
+    v1 = mathutils.Vector(p1)
+    v2 = mathutils.Vector(p2)
+    vec = v2 - v1
+    length = vec.length
+    if length < 1e-4:
+        return
+    mid = (v1 + v2) / 2.0
+    quat = vec.normalized().to_track_quat('Z', 'Y')
+    mat = mathutils.Matrix.Translation(mid) @ quat.to_matrix().to_4x4() @ mathutils.Matrix.Diagonal((radius * 2, radius * 2, length, 1.0))
+    bmesh.ops.create_cube(bm, size=1.0, matrix=mat)
+
+def build_dimension_annotations(cam_loc):
+    """
+    Create visual 3D dimension lines and text labels in a separate 'Annotations_Kich_Thuoc'
+    collection without altering any geometry of the cage system.
+    """
+    col = bpy.data.collections.new("Annotations_Kich_Thuoc")
+    bpy.context.scene.collection.children.link(col)
+
+    mat_line = create_emissive_material("Dim_Line_Mat", (0.05, 0.88, 1.0, 1.0), strength=1.2)
+    mat_text = create_emissive_material("Dim_Text_Mat", (1.0, 0.90, 0.15, 1.0), strength=1.8)
+
+    vn_font = None
+    for font_path in (r"C:\Windows\Fonts\arialbd.ttf", r"C:\Windows\Fonts\segoeuib.ttf", r"C:\Windows\Fonts\arial.ttf"):
+        try:
+            vn_font = bpy.data.fonts.load(font_path, check_existing=True)
+            break
+        except Exception:
+            pass
+
+    line_mesh = bpy.data.meshes.new("Duong_Giong_Kich_Thuoc_Mesh")
+    line_obj = bpy.data.objects.new("Duong_Giong_Kich_Thuoc", line_mesh)
+    col.objects.link(line_obj)
+    line_obj.data.materials.append(mat_line)
+    line_obj.visible_shadow = False
+    bm = bmesh.new()
+
+    def add_dim(p1, p2, tick_dir, label_text, text_offset=(0, 0, 0), text_size=9.0):
+        v1 = mathutils.Vector(p1)
+        v2 = mathutils.Vector(p2)
+        td = mathutils.Vector(tick_dir).normalized() * 3.0
+        add_line_segment(bm, v1, v2, radius=0.35)
+        add_line_segment(bm, v1 - td, v1 + td, radius=0.35)
+        add_line_segment(bm, v2 - td, v2 + td, radius=0.35)
+
+        mid = (v1 + v2) / 2.0 + mathutils.Vector(text_offset)
+        f_data = bpy.data.curves.new(type="FONT", name=f"Dim_{label_text}")
+        f_data.body = label_text
+        if vn_font is not None:
+            f_data.font = vn_font
+        f_data.align_x = 'CENTER'
+        f_data.align_y = 'CENTER'
+        f_data.size = text_size
+        f_data.extrude = 0.25
+        f_obj = bpy.data.objects.new(f"Label_{label_text}", f_data)
+        col.objects.link(f_obj)
+        f_obj.location = mid
+        f_obj.data.materials.append(mat_text)
+        f_obj.visible_shadow = False
+        # Orient text toward camera
+        to_cam = (mathutils.Vector(cam_loc) - mid).normalized()
+        f_obj.rotation_euler = to_cam.to_track_quat('Z', 'Y').to_euler()
+        f_obj.parent = line_obj
+
+    # Vertical stack cleanly outside the front corner
+    add_dim((-155, -135, 0), (-155, -135, 50), (1, 0, 0), "Chân 50 cm", text_offset=(-28, 0, 6))
+    add_dim((-155, -135, 50), (-155, -135, 110), (1, 0, 0), "Cao 60 cm", text_offset=(-28, 0, 0))
+    add_dim((-155, -135, 110), (-155, -135, 130), (1, 0, 0), "Cột thấp 20 cm", text_offset=(-34, 0, 0))
+
+    # Vertical back corner stack (40 cm roof column + 60 cm cage height)
+    add_dim((80, -132, 110), (80, -132, 150), (1, 0, 0), "Cột cao 40 cm", text_offset=(32, 6, -12))
+    add_dim((80, -132, 50), (80, -132, 110), (1, 0, 0), "Cao 60 cm", text_offset=(28, 6, 0))
+
+    # Horizontal depth/length dimensions along side
+    add_dim((-125, -146, 50), (-65, -146, 50), (0, 1, 0), "Sâu 60 cm", text_offset=(0, -14, 0), text_size=8.5)
+    add_dim((-65, -146, 50), (65, -146, 50), (0, 1, 0), "Dài 130 cm", text_offset=(0, -14, 0), text_size=8.5)
+
+    # X-face individual cage widths (60 cm each along Y):
+    for idx in range(4):
+        y_a = -120.0 + idx * 60.0
+        y_b = y_a + 60.0
+        add_dim((-140, y_a, 34), (-140, y_b, 34), (1, 0, 0), "Rộng 60 cm", text_offset=(-14, 0, -8), text_size=8.0)
+
+    add_dim((86, -120, 44), (86, -60, 44), (1, 0, 0), "Rộng 60 cm", text_offset=(28, -8, -4), text_size=8.5)
+
+    # Horizontal Y full width (240 cm) at -X bottom
+    add_dim((-168, -120, 2), (-168, 120, 2), (1, 0, 0), "Tổng rộng 240 cm", text_offset=(-24, 0, 8))
+
+    # Roof width (280 cm) and sloped X span (230 cm, +20cm overhang each side)
+    add_dim((-156, -140, 140), (-156, 140, 140), (0, 0, 1), "Mái rộng 280 cm", text_offset=(-18, 0, 10))
+    add_dim((-145, -158, 150), (85, -158, 174), (0, 0, 1), "Mái dài 230 cm", text_offset=(-28, -10, 14))
+
+    bm.to_mesh(line_mesh)
+    bm.free()
+    return col, line_obj
 
 def main():
     clear_scene()
@@ -505,6 +747,7 @@ def main():
     mat_fence = create_material("Galvanized_Fence_Mat", (0.58, 0.62, 0.66, 1.0), metallic=0.90, roughness=0.28)
     mat_gate_frame = create_material("Gate_Frame_Mat", (0.20, 0.24, 0.28, 1.0), metallic=0.85, roughness=0.30)
     mat_handle = create_material("Handle_Accent_Mat", (0.95, 0.50, 0.05, 1.0), metallic=0.40, roughness=0.35)
+    mat_roof = create_material("Ton_Lop_Mat", (0.45, 0.54, 0.64, 1.0), metallic=0.85, roughness=0.25)
 
     # 1. Build main hollow frame with -X guide rails
     main_obj = build_main_frame_with_tracks("Khoi_Khung_Luoi_Fence", SIZE_X, SIZE_Y, SIZE_Z, BAR_THICK, mat_frame, mat_rail, mat_handle)
@@ -532,7 +775,7 @@ def main():
         mat_gate_frame, mat_fence, mat_handle
     )
     gate_obj.parent = main_obj
-    gate_obj.location = (0.0, 0.0, 28.0)
+    gate_obj.location = (0.0, 0.0, 0.0)
 
     # 3b. Build the hinged top hatch door with latches (+Z open / -Z close)
     top_door_obj = create_hinged_hatch_door(
@@ -546,7 +789,7 @@ def main():
         rib_xs=(-41.5, -83.0),
         rib_ys=[],
         latch_offsets=(-16.0, 16.0),
-        open_deg=26.0,
+        open_deg=0.0,
         mat_gate_frame=mat_gate_frame,
         mat_fence=mat_fence,
         mat_handle=mat_handle,
@@ -622,7 +865,7 @@ def main():
         gate_copy.data = gate_obj.data.copy()
         gate_copy.name = f"Cua_Luoi_Truot_Truc_Z_{idx + 1}"
         gate_copy.parent = cage_copy
-        gate_copy.location = (0.0, 0.0, 28.0)
+        gate_copy.location = (0.0, 0.0, 0.0)
         default_collection().objects.link(gate_copy)
 
         door_copy = top_door_obj.copy()
@@ -661,34 +904,82 @@ def main():
         mat_frame, mat_fence, mat_gate_frame, mat_handle
     )
 
-    # Ground plane
-    bpy.ops.mesh.primitive_plane_add(size=1500, location=(-30, 0, -0.05))
+    # 6. Group all cages under 1 parent layer ('He_Thong_Chuong_Fence'), elevate 50 cm (+50 Z),
+    # and support with 4 steel legs at the outermost corners
+    ELEVATION_Z = 50.0
+    parent_group = bpy.data.objects.new("He_Thong_Chuong_Fence", None)
+    parent_group.empty_display_type = 'PLAIN_AXES'
+    parent_group.empty_display_size = 15.0
+    default_collection().objects.link(parent_group)
+
+    for cage in cages:
+        cage.parent = parent_group
+        cage.location.z = ELEVATION_Z
+
+    con_duc_obj.parent = parent_group
+    con_duc_obj.location.z = ELEVATION_Z
+
+    legs_obj = build_corner_support_legs(
+        "Chan_Chong_Sat_4_Goc",
+        x_min=-125.0,
+        x_max=65.0,
+        y_min=-120.0,
+        y_max=120.0,
+        height=ELEVATION_Z,
+        leg_size=4.0,
+        mat_leg=mat_frame,
+        mat_foot=mat_rail,
+    )
+    legs_obj.parent = parent_group
+
+    # 7. Build 4 upper corner steel pillars (+X: 40cm high, -X: 20cm high) and sloped corrugated roof (+20cm overhang)
+    roof_pillars_obj, roof_obj = build_upper_pillars_and_roof(
+        x_min=-125.0,
+        x_max=65.0,
+        y_min=-120.0,
+        y_max=120.0,
+        z_base=ELEVATION_Z + SIZE_Z,  # 110.0
+        h_pos_x=40.0,
+        h_neg_x=20.0,
+        pillar_size=4.0,
+        overhang=20.0,
+        mat_pillar=mat_frame,
+        mat_roof=mat_roof,
+    )
+    roof_pillars_obj.parent = parent_group
+    roof_obj.parent = parent_group
+
+    # Ground plane at Z = 0.0
+    bpy.ops.mesh.primitive_plane_add(size=1500, location=(-30, 0, 0.0))
     ground = bpy.context.active_object
     ground.name = "Studio_Floor"
     mat_floor = create_material("Floor_Mat", (0.22, 0.23, 0.25, 1.0), metallic=0.0, roughness=0.85)
     ground.data.materials.append(mat_floor)
 
-    # Camera positioned on the -X, -Y side (higher elevation) to clearly show all 5 openable top doors + latches
-    bpy.ops.object.camera_add(location=(-345.0, -305.0, 300.0))
+    # Camera positioned on the -X, -Y side to show the legs, elevated cages, roof, and dimension annotations cleanly
+    bpy.ops.object.camera_add(location=(-555.0, -485.0, 400.0))
     cam = bpy.context.active_object
     cam.data.clip_end = 3000.0
     bpy.context.scene.camera = cam
 
-    direction = mathutils.Vector((-25.0, 0.0, 48.0)) - cam.location
+    direction = mathutils.Vector((-40.0, 0.0, 66.0)) - cam.location
     cam.rotation_euler = direction.to_track_quat('-Z', 'Y').to_euler()
 
-    # Lighting from -X front-top to illuminate both 'khoi_khung_luoi_con_duc' and the 4 cages
-    bpy.ops.object.light_add(type='SUN', location=(-220.0, -180.0, 280.0))
+    # 8. Build visual 3D dimension annotations in separate toggleable collection
+    build_dimension_annotations(cam.location)
+
+    # Lighting from -X front-top to illuminate both the elevated assembly and the legs underneath
+    bpy.ops.object.light_add(type='SUN', location=(-220.0, -180.0, 320.0))
     sun = bpy.context.active_object
     sun.data.energy = 3.5
-    sun_dir = mathutils.Vector((-30.0, 0.0, 20.0)) - sun.location
+    sun_dir = mathutils.Vector((-30.0, 0.0, 40.0)) - sun.location
     sun.rotation_euler = sun_dir.to_track_quat('-Z', 'Y').to_euler()
 
-    bpy.ops.object.light_add(type='AREA', location=(200.0, 200.0, 220.0))
+    bpy.ops.object.light_add(type='AREA', location=(200.0, 200.0, 260.0))
     fill = bpy.context.active_object
-    fill.data.energy = 160000.0
-    fill.data.size = 280.0
-    fill_dir = mathutils.Vector((-20.0, 0.0, 30.0)) - fill.location
+    fill.data.energy = 180000.0
+    fill.data.size = 300.0
+    fill_dir = mathutils.Vector((-20.0, 0.0, 60.0)) - fill.location
     fill.rotation_euler = fill_dir.to_track_quat('-Z', 'Y').to_euler()
 
     # Adjust viewport clip_end
@@ -699,8 +990,8 @@ def main():
                     if space.type == 'VIEW_3D':
                         space.clip_end = 5000.0
 
-    print("Created 4 cages at Y:", [c.location.y for c in cages])
-    print("khoi_khung_luoi_con_duc dimensions:", tuple(round(d, 2) for d in con_duc_obj.dimensions), "at", tuple(round(v, 2) for v in con_duc_obj.location))
-    print("Cua_Nap_Con_Duc rotation Y (deg):", round(math.degrees(con_duc_door.rotation_euler.y), 1))
+    print("Parent container:", parent_group.name, "children:", [c.name for c in parent_group.children])
+    print("Roof pillars dimensions:", tuple(round(d, 2) for d in roof_pillars_obj.dimensions))
+    print("Roof sheet dimensions:", tuple(round(d, 2) for d in roof_obj.dimensions))
 
 main()
